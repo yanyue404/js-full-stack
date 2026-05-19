@@ -117,13 +117,15 @@
 5. RAG 检索增强生成入门（原理图解、简单实现）
 6. MCP（Model Context Protocol）简介
 7. AI 产品中的真实场景（智能客服、内容生成、数据分析）
-8. Vercel AI SDK 集成（文本生成、流式响应）
-9. 结构化输出与 Function Calling
-10. 上下文管理与多轮对话
-11. 流式响应与前端渲染
-12. 失败兜底、降级策略与回归验证
-13. AI 工具链：Cursor / Claude / ChatGPT 实际工作流
-14. 练习：构建一个 AI 驱动的知识问答应用
+8. Vercel AI SDK 集成（文本生成、流式响应、React 集成）
+9. Vercel AI SDK vs LangChain.js 选型建议
+10. 结构化输出与 Function Calling
+11. 上下文管理与多轮对话
+12. 流式响应与前端渲染
+13. 失败兜底、降级策略与回归验证
+14. AI 工具链：Cursor / Claude / ChatGPT 实际工作流
+15. Python 在 AI 全栈中的位置（Node.js vs Python、典型混合架构）
+16. 练习：构建一个 AI 驱动的知识问答应用
 
 ## 第七讲：[混合应用与 WebView](docs/07-hybrid.md)
 
