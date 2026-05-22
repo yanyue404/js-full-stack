@@ -77,3 +77,30 @@ npx husky init
 - `tsconfig.json` 的 `paths` 和 `vite.config.ts` 的 `resolve.alias` 需要同时配置
 - Zustand 的 `create` 函数接受泛型：`create<TodoStore>((set) => ({...}))`
 - `eslint-config-prettier` 用来关闭 ESLint 中和 Prettier 冲突的规则
+
+## 参考实现
+
+本目录提供了一份完整的"迁移完成"版本，相比 demo 01 多出：
+
+- **严格的 TS 配置**：`strict`、`noUnusedLocals`、`noUnusedParameters` 全开
+- **ESLint flat config**：`eslint.config.js`（typescript-eslint + react-hooks + react-refresh + prettier 关冲突）
+- **Prettier**：`.prettierrc` + `.prettierignore`
+- **husky + lint-staged**：`.husky/pre-commit`，提交前自动 `eslint --fix` + `prettier --write`
+- **高级 TS 实战**：
+  - `src/components/List.tsx` —— 泛型组件 `List<T>`
+  - `src/hooks/useAsync.ts` —— 类型完整的自定义 Hook
+  - `src/types/todo.ts` —— `Pick` / `Partial` / `Record` 工具类型应用
+  - `src/store/todoStore.ts` —— `create<TodoStore>` 显式泛型 + 状态/动作类型拆分
+
+运行：
+
+```bash
+cd demos/02-ts-migration
+pnpm install
+pnpm dev          # 启动
+pnpm typecheck    # 类型检查
+pnpm lint         # ESLint
+pnpm format       # Prettier 格式化
+```
+
+> 第一次 clone 后 husky 会通过 `prepare` 脚本自动注册 Git 钩子，无需手动 `husky init`。

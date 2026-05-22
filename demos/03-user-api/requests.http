@@ -1,0 +1,50 @@
+@host = http://localhost:8080
+
+### 健康检查
+GET {{host}}/api/health
+
+### 登录（admin）
+# @name loginAdmin
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "Admin1234"
+}
+
+### 登录（普通用户）
+# @name loginUser
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "password": "Alice1234"
+}
+
+### 注册新用户
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "bob@example.com",
+  "password": "Bob12345",
+  "name": "Bob"
+}
+
+### 用户列表（需要登录）
+GET {{host}}/api/users?page=1&limit=10
+Authorization: Bearer {{loginAdmin.response.body.accessToken}}
+
+### 刷新 Token
+POST {{host}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{loginAdmin.response.body.refreshToken}}"
+}
+
+### 删除用户（仅 admin）
+DELETE {{host}}/api/users/SOME_USER_ID
+Authorization: Bearer {{loginAdmin.response.body.accessToken}}

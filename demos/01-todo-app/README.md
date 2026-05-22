@@ -52,3 +52,34 @@ pnpm dev
 - Zustand 持久化使用 `zustand/middleware` 的 `persist`
 - shadcn/ui 的 Checkbox 组件适合做 Todo 状态切换
 - Tailwind 的 `grid` + `md:` 断点处理响应式
+
+## 参考实现
+
+本目录已经提供了一份完整的参考实现，目录结构：
+
+```
+01-todo-app/
+├── src/
+│   ├── components/ui/      # 模拟 shadcn 风格的 Button / Input / Checkbox / Card
+│   ├── pages/              # Layout + 列表页 + 详情页 + 关于页
+│   ├── store/todoStore.ts  # Zustand store（含 persist 中间件）
+│   ├── lib/utils.ts        # cn() 工具函数
+│   ├── App.tsx             # 路由配置
+│   ├── main.tsx            # 入口
+│   └── index.css           # Tailwind 基础样式 + CSS 变量
+├── tailwind.config.js
+├── postcss.config.js
+├── vite.config.ts
+├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
+└── package.json
+```
+
+运行参考实现：
+
+```bash
+cd demos/01-todo-app
+pnpm install
+pnpm dev
+```
+
+> 说明：示例中 `components/ui/*` 是手写的最小化"shadcn 风格"组件，避免引入完整 shadcn CLI 链路。真实项目里建议跑 `pnpm dlx shadcn@latest init` 让 CLI 帮你生成同等结构的组件。
