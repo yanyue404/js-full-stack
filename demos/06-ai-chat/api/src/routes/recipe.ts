@@ -1,3 +1,9 @@
+/**
+ * 食谱路由：generateObject 结构化输出演示。
+ *
+ * 与 chat 的区别：一次性返回 JSON，不走 SSE；zod schema 约束字段类型。
+ * 扩展点：复制 recipeSchema 模式即可新增其他结构化能力（如行程、简历解析）。
+ */
 import { Router } from 'express'
 import { generateObject } from 'ai'
 import { z } from 'zod'
@@ -6,6 +12,7 @@ import { withRetry } from '../ai/retry.js'
 
 const recipeRouter = Router()
 
+// describe() 会进入 schema 提示，帮助模型理解各字段含义
 const recipeSchema = z.object({
   name: z.string().describe('菜品名称'),
   cuisine: z.string().describe('菜系，如 川菜 / 粤菜'),
@@ -44,7 +51,11 @@ recipeRouter.post('/recipe', async (req, res) => {
         generateObject({
           model,
           schema: recipeSchema,
-          system: '你是一位中餐主厨，输出严格符合 schema 的食谱 JSON。',
+          // mode 说明：
+          // - 'auto'（默认）走 tool calling，第三方兼容接口常报 NoObjectGeneratedError
+          // - 'json'  走 JSON 模式，兼容性更好；官方 OpenAI 也可正常工作
+          mode: 'json',
+          system: '你是一位中餐主厨，只输出符合 schema 的 JSON，不要 markdown 代码块或多余说明。',
           prompt: `请给我一个 "${parsed.data.dish}" 的家常做法。`
         })
       )

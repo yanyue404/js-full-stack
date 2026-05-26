@@ -1,3 +1,7 @@
+/**
+ * 结构化食谱页 — 普通 fetch 调用 /api/recipe，演示 generateObject 的非流式场景。
+ * 类型 Recipe 应与后端 api/src/routes/recipe.ts 的 zod schema 保持一致。
+ */
 import { useState, type FormEvent } from 'react'
 
 interface Recipe {
@@ -12,6 +16,12 @@ interface Recipe {
 interface RecipeResponse {
   model: string
   recipe: Recipe
+}
+
+const DIFFICULTY_CLASS: Record<Recipe['difficulty'], string> = {
+  简单: 'easy',
+  中等: 'medium',
+  困难: 'hard'
 }
 
 export function RecipeView() {
@@ -45,58 +55,73 @@ export function RecipeView() {
 
   return (
     <div className="recipe">
-      <h2 style={{ margin: 0 }}>结构化输出演示</h2>
-      <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>
-        后端用 <code>generateObject + zod schema</code> 让模型输出严格结构化的食谱 JSON。
-      </p>
-      <form onSubmit={handleSubmit}>
+      <section className="recipe-intro">
+        <p className="recipe-lead">
+          后端用 <code>generateObject + zod schema</code> 让模型输出严格结构化的食谱 JSON，前端直接消费类型安全的数据。
+        </p>
+      </section>
+
+      <form className="recipe-form" onSubmit={handleSubmit}>
         <input
           value={dish}
           onChange={(e) => setDish(e.target.value)}
           placeholder="想做什么菜？例如 麻婆豆腐"
           disabled={loading}
+          aria-label="菜名"
         />
-        <button type="submit" disabled={loading || !dish.trim()}>
+        <button type="submit" className="btn btn-send" disabled={loading || !dish.trim()}>
           {loading ? '生成中...' : '生成食谱'}
         </button>
       </form>
 
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
 
       {data && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 12, color: '#9ca3af' }}>by {data.model}</div>
-          <h3 style={{ margin: 0 }}>
-            {data.recipe.name} · {data.recipe.cuisine}
-          </h3>
-          <div style={{ fontSize: 13, color: '#374151' }}>
-            难度：{data.recipe.difficulty} · 用时约 {data.recipe.cookingMinutes} 分钟
+        <article className="recipe-card">
+          <div className="recipe-card-head">
+            <div>
+              <p className="recipe-model">by {data.model}</p>
+              <h3 className="recipe-name">{data.recipe.name}</h3>
+              <p className="recipe-cuisine">{data.recipe.cuisine}</p>
+            </div>
+            <div className="recipe-meta">
+              <span className={`recipe-tag ${DIFFICULTY_CLASS[data.recipe.difficulty]}`}>
+                {data.recipe.difficulty}
+              </span>
+              <span className="recipe-time">约 {data.recipe.cookingMinutes} 分钟</span>
+            </div>
           </div>
-          <div>
-            <strong>食材：</strong>
-            <ul>
+
+          <div className="recipe-section">
+            <h4>食材</h4>
+            <ul className="recipe-ingredients">
               {data.recipe.ingredients.map((it, idx) => (
                 <li key={idx}>
-                  {it.name} · {it.amount}
+                  <span>{it.name}</span>
+                  <span>{it.amount}</span>
                 </li>
               ))}
             </ul>
           </div>
-          <div>
-            <strong>步骤：</strong>
-            <ol>
+
+          <div className="recipe-section">
+            <h4>步骤</h4>
+            <ol className="recipe-steps">
               {data.recipe.steps.map((step, idx) => (
                 <li key={idx}>{step}</li>
               ))}
             </ol>
           </div>
-          <details>
-            <summary style={{ cursor: 'pointer', color: '#6b7280', fontSize: 13 }}>
-              查看原始 JSON
-            </summary>
+
+          <details className="recipe-raw">
+            <summary>查看原始 JSON</summary>
             <pre>{JSON.stringify(data.recipe, null, 2)}</pre>
           </details>
-        </div>
+        </article>
       )}
     </div>
   )

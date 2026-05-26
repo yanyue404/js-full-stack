@@ -1,3 +1,7 @@
+/**
+ * 时间 tool — 读取服务器当前时间，支持 IANA 时区。
+ * toolCompat 会通过关键词映射时区后调用此 execute。
+ */
 import { tool } from 'ai'
 import { z } from 'zod'
 
