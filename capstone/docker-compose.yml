@@ -1,0 +1,69 @@
+# 本地：docker compose up -d --build                         → http://localhost:8000
+# 监控：docker compose --profile monitoring up -d --build    → Prometheus :9090 / Grafana :3001
+# 服务器：设置 API_IMAGE / WEB_IMAGE 后 docker compose pull && docker compose up -d --no-build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: teamboard
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-teamboard}
+      POSTGRES_DB: teamboard
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U teamboard -d teamboard']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ${API_IMAGE:-teamboard-api}
+    build: ./api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://teamboard:${DB_PASSWORD:-teamboard}@db:5432/teamboard
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-please-change-in-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: ${WEB_IMAGE:-teamboard-web}
+    build: ./web
+    restart: unless-stopped
+    ports:
+      - '${HTTP_PORT:-8000}:80'
+    depends_on:
+      api:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus
+    profiles: [monitoring]
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana
+    profiles: [monitoring]
+    ports:
+      - '3001:3000'
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  pg-data:

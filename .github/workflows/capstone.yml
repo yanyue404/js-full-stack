@@ -1,0 +1,84 @@
+name: Capstone CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths: ['capstone/**', '.github/workflows/capstone.yml']
+  pull_request:
+    paths: ['capstone/**', '.github/workflows/capstone.yml']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [api, web]
+    defaults:
+      run:
+        working-directory: capstone/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: capstone/${{ matrix.app }}/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - if: matrix.app == 'api'
+        run: pnpm test
+      - run: pnpm build
+
+  # PR 只验证镜像能构建；main 分支推送到 GHCR
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/teamboard-${{ matrix.app }}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: capstone/${{ matrix.app }}
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }},${{ env.IMAGE }}:latest
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  # 在仓库 Settings → Variables 设置 DEPLOY_ENABLED=true，并配置 SERVER_HOST / SERVER_USER / SSH_PRIVATE_KEY 三个 Secrets
+  deploy:
+    needs: image
+    if: github.event_name == 'push' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/teamboard
+            export API_IMAGE=ghcr.io/${{ github.repository }}/teamboard-api:${{ github.sha }}
+            export WEB_IMAGE=ghcr.io/${{ github.repository }}/teamboard-web:${{ github.sha }}
+            docker compose pull api web
+            docker compose up -d --no-build
+            docker image prune -f
+            # 冒烟检查失败则让流水线报红，便于按上一个 sha 回滚
+            curl -fsS --retry 10 --retry-delay 3 http://localhost:${HTTP_PORT:-8000}/api/health
