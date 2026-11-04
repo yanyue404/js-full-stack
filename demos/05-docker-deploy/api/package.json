@@ -1,0 +1,27 @@
+{
+  "name": "fullstack-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.15",
+    "cors": "^2.8.6",
+    "drizzle-orm": "^0.45.4",
+    "express": "^5",
+    "postgres": "^4.0.0",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5",
+    "@types/node": "^22",
+    "tsx": "^4.23.15",
+    "typescript": "^5.6.3"
+  }
+}

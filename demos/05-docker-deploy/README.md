@@ -212,6 +212,24 @@ JWT_SECRET=production-secret-key-at-least-32-chars
 - [ ] GitHub Actions 工作流语法正确（可在 Actions 页面看到）
 - [ ] Nginx 正确代理前端和 API
 
+## 参考实现
+
+本目录已附带参考实现（`api/` + `web/` + `nginx/` + compose + `.github/workflows/deploy.yml`）：
+
+```bash
+# 有 Docker：一键启动，浏览器打开 http://localhost
+docker compose --env-file .env.development up -d --build
+
+# 开发模式（额外暴露 5432 / 8080 端口）
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.development up -d --build
+
+# 没有 Docker：api 自动回退到 PGlite，web 通过 Vite 代理 /api
+cd api && pnpm install && pnpm dev     # :8080
+cd web && pnpm install && pnpm dev     # :5173
+```
+
+> `.github/workflows/deploy.yml` 需要放在**独立仓库的根目录**才会被 GitHub 执行。
+
 ## 提示
 
 - 前端构建产物直接用 Nginx 托管，不需要 Node 运行时

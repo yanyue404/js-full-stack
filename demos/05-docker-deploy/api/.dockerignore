@@ -1,0 +1,4 @@
+node_modules
+dist
+.pglite
+.env*

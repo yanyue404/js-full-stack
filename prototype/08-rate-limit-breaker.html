@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 08 · 限流、熔断与降级</title>
+<style>
+:root{--a:#2563eb;--bg:#f7f7f8;--fg:#1f2328;--mut:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--a)}
+h1{margin:8px 0 6px;font-size:24px}
+h2{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);letter-spacing:.05em;margin:0 0 10px}
+h2 button{margin:0 0 0 auto}
+.q{color:var(--mut);margin:4px 0}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:10px}
+.f{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.f b{display:block;font-size:12px;color:var(--mut);font-weight:500}
+.changed{border-color:var(--a)!important;background:#eff6ff}
+.note{margin:12px 0 0;padding:8px 12px;border-left:3px solid var(--a);background:#f8fafc}
+button{font:inherit;font-size:14px;padding:6px 12px;margin:0 6px 6px 0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--a);color:var(--a)}
+button:disabled{opacity:.4;cursor:default}
+.tabs button.on{background:var(--a);color:#fff;border-color:var(--a)}
+.steps button.next{border-color:var(--a);color:var(--a);font-weight:600}
+.steps button.done{text-decoration:line-through}
+.ok{color:#15803d}.bad{color:#b91c1c}.warn{color:#b45309}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+th{color:var(--mut);font-weight:500}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <a href="index.html">← 全部原型</a>
+  <h1>第八讲 · 限流、熔断与降级</h1>
+  <p class="q"><b>要回答的问题：</b>下游服务挂掉时，熔断器在"关闭 → 打开 → 半开 → 关闭"之间如何切换？熔断打开期间用户看到什么（缓存 or 报错）？限流和熔断叠加时谁先生效？</p>
+  <p class="q">PROTOTYPE · 一次性演示，时间是模拟的。规则：每 10 秒最多 5 个请求；连续失败 3 次熔断；熔断 30 秒后放行 1 个探测请求。</p>
+
+  <section><h2>当前状态</h2><div id="state"></div><p class="note" id="note"></p></section>
+  <section><h2>自由试玩 <button id="reset">重置</button></h2><div id="free"></div></section>
+  <section><h2>引导式演练</h2><div class="tabs" id="tabs"></div><p id="desc"></p><div class="steps" id="steps"></div></section>
+</main>
+
+<!-- ① 纯逻辑模块 -->
+<script>
+const LIMIT = 5
+const WINDOW = 10
+const FAIL_THRESHOLD = 3
+const OPEN_SECONDS = 30
+
+const ProdModel = {
+  init: () => ({
+    now: 0,
+    downstream: 'ok',
+    limiter: { windowStart: 0, count: 0 },
+    breaker: { state: 'closed', failures: 0, openedAt: null },
+    cache: null, // { value, at }
+    stats: { ok: 0, limited: 0, fallback: 0, error: 0 },
+    log: [],
+    note: ''
+  }),
+
+  /** 单个请求的完整处理链：限流 → 熔断 → 调用下游 → 降级 */
+  handle(s) {
+    // 1. 固定窗口限流
+    if (s.now - s.limiter.windowStart >= WINDOW) s.limiter = { windowStart: s.now, count: 0 }
+    if (++s.limiter.count > LIMIT) { s.stats.limited++; return '429 Too Many Requests（限流，连熔断器都没走到）' }
+
+    // 2. 熔断器：打开状态到期后进入半开
+    const b = s.breaker
+    if (b.state === 'open' && s.now - b.openedAt >= OPEN_SECONDS) b.state = 'half-open'
+    if (b.state === 'open') return ProdModel.fallback(s, '熔断打开，未调用下游')
+
+    // 3. 调用下游
+    if (s.downstream === 'ok') {
+      const wasHalf = b.state === 'half-open'
+      Object.assign(b, { state: 'closed', failures: 0, openedAt: null })
+      s.cache = { value: '商品列表 v' + (s.stats.ok + 1), at: s.now }
+      s.stats.ok++
+      return `200 正常返回${wasHalf ? '（半开探测成功，熔断关闭）' : ''}，并刷新缓存`
+    }
+    b.failures++
+    if (b.state === 'half-open' || b.failures >= FAIL_THRESHOLD) {
+      const reason = b.state === 'half-open' ? '半开探测失败' : `连续失败 ${b.failures} 次`
+      Object.assign(b, { state: 'open', openedAt: s.now })
+      return ProdModel.fallback(s, `下游超时，${reason} → 熔断打开`)
+    }
+    return ProdModel.fallback(s, `下游超时（失败 ${b.failures}/${FAIL_THRESHOLD}）`)
+  },
+
+  fallback(s, why) {
+    if (s.cache) { s.stats.fallback++; return `200 返回缓存「${s.cache.value}」（${s.now - s.cache.at} 秒前）· ${why}` }
+    s.stats.error++
+    return `503 服务暂不可用 · ${why}`
+  },
+
+  reduce(state, a) {
+    const s = structuredClone(state)
+    const say = (n) => ((s.note = n), s)
+    switch (a.type) {
+      case 'request': {
+        const results = []
+        for (let i = 0; i < a.n; i++) results.push(ProdModel.handle(s))
+        results.forEach((r, i) => s.log.unshift(`${s.now}s #${i + 1}：${r}`))
+        s.log = s.log.slice(0, 12)
+        return say(results.length === 1 ? results[0] : `连发 ${a.n} 个请求，最后一个：${results.at(-1)}`)
+      }
+      case 'downstream':
+        s.downstream = a.v
+        return say(a.v === 'ok' ? '下游恢复正常' : '下游开始超时')
+      case 'tick':
+        s.now += a.seconds
+        return say(`时间 +${a.seconds} 秒`)
+    }
+    return state
+  }
+}
+const Model = ProdModel
+</script>
+
+<!-- ② 页面配置 -->
+<script>
+const ACTIONS = [
+  { label: '发送 1 个请求', action: { type: 'request', n: 1 } },
+  { label: '连发 6 个请求', action: { type: 'request', n: 6 } },
+  { label: '下游故障', action: { type: 'downstream', v: 'down' } },
+  { label: '下游恢复', action: { type: 'downstream', v: 'ok' } },
+  { label: '时间 +10 秒', action: { type: 'tick', seconds: 10 } },
+  { label: '时间 +30 秒', action: { type: 'tick', seconds: 30 } }
+]
+const A = Object.fromEntries(ACTIONS.map((a) => [a.label, a.action]))
+const SCENARIOS = [
+  { name: '限流', desc: '10 秒窗口内第 6 个请求被拒绝，返回 429。窗口过去后恢复。', steps: ['连发 6 个请求', '时间 +10 秒', '发送 1 个请求'] },
+  {
+    name: '熔断与恢复',
+    desc: '先成功一次写入缓存。下游故障后连续失败 3 次，熔断打开：后续请求不再打到下游，直接返回缓存（降级）。30 秒后进入半开，放一个探测请求；下游已恢复，熔断关闭。',
+    steps: ['发送 1 个请求', '下游故障', '发送 1 个请求', '发送 1 个请求', '发送 1 个请求', '发送 1 个请求', '时间 +30 秒', '下游恢复', '发送 1 个请求']
+  },
+  { name: '探测失败', desc: '半开时下游仍然故障：探测请求失败，熔断立刻重新打开，再等 30 秒。没有缓存时用户看到 503。', steps: ['下游故障', '发送 1 个请求', '发送 1 个请求', '发送 1 个请求', '时间 +30 秒', '发送 1 个请求', '发送 1 个请求'] }
+].map((s) => ({ ...s, steps: s.steps.map((label) => ({ label, action: A[label] })) }))
+
+const BREAKER = { closed: '<span class="ok">关闭（正常放行）</span>', open: '<span class="bad">打开（直接降级）</span>', 'half-open': '<span class="warn">半开（放行探测）</span>' }
+function breakerText(s) {
+  const b = s.breaker
+  if (b.state === 'open') {
+    const left = OPEN_SECONDS - (s.now - b.openedAt)
+    return left > 0 ? `${BREAKER.open}<br><small>${left} 秒后半开</small>` : `${BREAKER.open}<br><small>下个请求将半开探测</small>`
+  }
+  return `${BREAKER[b.state]}<br><small>失败计数 ${b.failures}/${FAIL_THRESHOLD}</small>`
+}
+function VIEW(s, p) {
+  const win = (x) => `${x.limiter.count > LIMIT ? LIMIT : x.limiter.count}/${LIMIT}（窗口起点 ${x.limiter.windowStart}s）`
+  const st = (x) => `成功 ${x.stats.ok} · 缓存降级 ${x.stats.fallback} · 限流 ${x.stats.limited} · 503 ${x.stats.error}`
+  return `<div class="grid">
+    ${field('模拟时间', `${s.now} 秒`, `${p.now} 秒`)}
+    ${field('下游服务', s.downstream === 'ok' ? '<span class="ok">正常</span>' : '<span class="bad">超时</span>', p.downstream === 'ok' ? '<span class="ok">正常</span>' : '<span class="bad">超时</span>')}
+    ${field('熔断器', breakerText(s), breakerText(p))}
+    ${field('限流窗口', win(s), win(p))}
+    ${field('缓存', s.cache ? `${s.cache.value}` : '空', p.cache ? `${p.cache.value}` : '空')}
+    ${field('累计结果', st(s), st(p))}
+  </div>
+  <table><tr><th>请求日志（新的在上）</th></tr>
+    ${s.log.map((l) => `<tr><td class="${l.includes('429') || l.includes('503') ? 'bad' : l.includes('缓存「') ? 'warn' : 'ok'}">${l}</td></tr>`).join('') || '<tr><td class="q">暂无</td></tr>'}
+  </table>`
+}
+</script>
+
+<!-- ③ 通用外壳 -->
+<script>
+const $ = (id) => document.getElementById(id)
+function field(label, v, pv) {
+  return `<div class="f${pv !== undefined && String(v) !== String(pv) ? ' changed' : ''}"><b>${label}</b>${v ?? '—'}</div>`
+}
+let state, prev, tab = 0, step = 0
+function dispatch(action) { prev = state; state = Model.reduce(state, action); paint() }
+function reset() { state = Model.init(); prev = state; step = 0; paint() }
+function paint() {
+  $('state').innerHTML = VIEW(state, prev)
+  $('note').innerHTML = state.note ? `刚刚发生：${state.note}` : '点击下方任意按钮开始。蓝框 = 这一步发生变化的字段。'
+  const sc = SCENARIOS[tab]
+  $('tabs').innerHTML = SCENARIOS.map((s, i) => `<button data-tab="${i}" class="${i === tab ? 'on' : ''}">${s.name}</button>`).join('')
+  $('desc').innerHTML = sc.desc
+  $('steps').innerHTML = sc.steps.map((s, i) => `<button data-step="${i}" class="${i < step ? 'done' : i === step ? 'next' : ''}" ${i === step ? '' : 'disabled'}>${i + 1}. ${s.label}</button>`).join('') +
+    (step >= sc.steps.length ? '<p class="ok">✓ 演练完成。可以切换其他场景，或继续自由试玩。</p>' : '')
+}
+$('free').innerHTML = ACTIONS.map((a, i) => `<button data-free="${i}">${a.label}</button>`).join('')
+$('reset').onclick = reset
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button')
+  if (!b) return
+  if (b.dataset.free) dispatch(ACTIONS[b.dataset.free].action)
+  if (b.dataset.tab) { tab = +b.dataset.tab; reset() }
+  if (b.dataset.step) { const s = SCENARIOS[tab].steps[step++]; dispatch(s.action) }
+})
+reset()
+</script>
+</body>
+</html>

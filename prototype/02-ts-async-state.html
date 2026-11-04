@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 02 · 用类型消灭非法状态</title>
+<style>
+:root{--a:#2563eb;--bg:#f7f7f8;--fg:#1f2328;--mut:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--a)}
+h1{margin:8px 0 6px;font-size:24px}
+h2{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);letter-spacing:.05em;margin:0 0 10px}
+h2 button{margin:0 0 0 auto}
+.q{color:var(--mut);margin:4px 0}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:10px}
+.f{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.f b{display:block;font-size:12px;color:var(--mut);font-weight:500}
+.changed{border-color:var(--a)!important;background:#eff6ff}
+.note{margin:12px 0 0;padding:8px 12px;border-left:3px solid var(--a);background:#f8fafc}
+button{font:inherit;font-size:14px;padding:6px 12px;margin:0 6px 6px 0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--a);color:var(--a)}
+button:disabled{opacity:.4;cursor:default}
+.tabs button.on{background:var(--a);color:#fff;border-color:var(--a)}
+.steps button.next{border-color:var(--a);color:var(--a);font-weight:600}
+.steps button.done{text-decoration:line-through}
+.ok{color:#15803d}.bad{color:#b91c1c}.warn{color:#b45309}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+th{color:var(--mut);font-weight:500}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <a href="index.html">← 全部原型</a>
+  <h1>第二讲 · 用类型消灭非法状态</h1>
+  <p class="q"><b>要回答的问题：</b>一个异步请求的状态，用"可辨识联合"建模，能否从根上杜绝"既在加载又有报错""数据和错误同时存在"这类组合？和常见的三个布尔/可空字段写法相比差在哪？</p>
+  <p class="q">PROTOTYPE · 一次性演示。左右两个模型接收<b>完全相同</b>的事件。可迁入真实代码的是 <code>AsyncState</code>（对应 <code>useAsync</code> hook）。</p>
+  <pre style="font-size:13px;background:#f3f4f6;padding:10px;border-radius:8px;overflow:auto">// 可辨识联合：每种状态只携带它该有的字段
+type AsyncState&lt;T&gt; =
+  | { status: 'idle' }
+  | { status: 'loading'; attempt: number }
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: string; attempt: number }
+
+// 对照组：三个独立字段，可以组合出 2×2×2 = 8 种情况，其中大半是非法的
+interface FlagsState&lt;T&gt; { isLoading: boolean; data?: T; error?: string }</pre>
+
+  <section><h2>当前状态</h2><div id="state"></div><p class="note" id="note"></p></section>
+  <section><h2>自由试玩 <button id="reset">重置</button></h2><div id="free"></div></section>
+  <section><h2>引导式演练</h2><div class="tabs" id="tabs"></div><p id="desc"></p><div class="steps" id="steps"></div></section>
+</main>
+
+<!-- ① 纯逻辑模块 -->
+<script>
+/** 状态机：只允许合法转换，其余事件被拒绝 */
+const AsyncState = {
+  init: () => ({ status: 'idle' }),
+  transition(s, e) {
+    switch (e.type) {
+      case 'fetch':
+        if (s.status === 'loading') return [s, '已有请求进行中，忽略重复请求']
+        return [{ status: 'loading', attempt: (s.attempt ?? 0) + 1 }, `进入加载（第 ${(s.attempt ?? 0) + 1} 次）`]
+      case 'resolve':
+        if (s.status !== 'loading') return [s, '❌ 拒绝：没有进行中的请求，丢弃这个迟到的响应']
+        return [{ status: 'success', data: e.data }, '请求成功，旧的错误信息随状态一起消失']
+      case 'reject':
+        if (s.status !== 'loading') return [s, '❌ 拒绝：没有进行中的请求']
+        return [{ status: 'error', error: e.error, attempt: s.attempt }, '请求失败']
+      case 'reset':
+        return [{ status: 'idle' }, '回到初始状态']
+    }
+    return [s, '']
+  }
+}
+
+/** 对照组：典型的"顺手写法"，每个处理函数只改自己关心的字段 */
+const Flags = {
+  init: () => ({ isLoading: false, data: undefined, error: undefined }),
+  transition(s, e) {
+    switch (e.type) {
+      case 'fetch': return { ...s, isLoading: true }
+      case 'resolve': return { ...s, isLoading: false, data: e.data }
+      case 'reject': return { ...s, isLoading: false, error: e.error }
+      case 'reset': return Flags.init()
+    }
+    return s
+  },
+  problems(s) {
+    const p = []
+    if (s.isLoading && s.error) p.push('加载中却显示错误')
+    if (s.data !== undefined && s.error) p.push('数据和错误同时存在')
+    if (s.isLoading && s.data !== undefined) p.push('加载中仍显示旧数据（可能合理，但没法从类型上区分）')
+    return p
+  }
+}
+
+const Model = {
+  init: () => ({ u: AsyncState.init(), f: Flags.init(), note: '' }),
+  reduce(state, e) {
+    const [u, msg] = AsyncState.transition(state.u, e)
+    const f = Flags.transition(state.f, e)
+    const issues = Flags.problems(f)
+    return { u, f, note: `联合类型：${msg}。布尔字段：${issues.length ? '⚠️ ' + issues.join('；') : '看起来正常'}` }
+  }
+}
+</script>
+
+<!-- ② 页面配置 -->
+<script>
+const ACTIONS = [
+  { label: '发起请求', action: { type: 'fetch' } },
+  { label: '服务端返回成功', action: { type: 'resolve', data: '用户列表(3)' } },
+  { label: '服务端返回失败', action: { type: 'reject', error: '网络超时' } },
+  { label: '重置', action: { type: 'reset' } }
+]
+const A = Object.fromEntries(ACTIONS.map((a) => [a.label, a.action]))
+const SCENARIOS = [
+  { name: '一次成功', desc: '最普通的路径：两个模型表现一致，看不出差别。', steps: ['发起请求', '服务端返回成功'] },
+  {
+    name: '失败后重试',
+    desc: '第一次失败、点击重试、第二次成功。留意右侧：重试时 <code>isLoading</code> 和 <code>error</code> 同时为真，成功后旧错误仍然残留——界面会同时显示数据和红色报错。',
+    steps: ['发起请求', '服务端返回失败', '发起请求', '服务端返回成功']
+  },
+  {
+    name: '迟到的响应',
+    desc: '用户已经重置了页面，旧请求的响应才回来。联合类型模型拒绝了它；布尔模型照单全收，把过期数据写进了界面。',
+    steps: ['发起请求', '重置', '服务端返回成功']
+  }
+].map((s) => ({ ...s, steps: s.steps.map((label) => ({ label, action: A[label] })) }))
+
+const show = (v) => (v === undefined ? '<span class="q">undefined</span>' : v === true ? 'true' : v === false ? 'false' : v)
+function VIEW(s, p) {
+  const issues = Flags.problems(s.f)
+  return `<div class="cols">
+    <div><b>可辨识联合（推荐）</b>
+      <div class="grid" style="margin-top:6px">
+        ${field('status', s.u.status, p.u.status)}
+        ${field('attempt', show(s.u.attempt), show(p.u.attempt))}
+        ${field('data', show(s.u.data), show(p.u.data))}
+        ${field('error', show(s.u.error), show(p.u.error))}
+      </div>
+      <p class="ok">✓ 非法组合在类型层面无法表达</p>
+    </div>
+    <div><b>三个独立字段（对照组）</b>
+      <div class="grid" style="margin-top:6px">
+        ${field('isLoading', show(s.f.isLoading), show(p.f.isLoading))}
+        ${field('data', show(s.f.data), show(p.f.data))}
+        ${field('error', show(s.f.error), show(p.f.error))}
+      </div>
+      ${issues.length ? `<p class="bad">⚠️ ${issues.join('<br>⚠️ ')}</p>` : '<p class="ok">当前组合合法</p>'}
+    </div>
+  </div>`
+}
+</script>
+
+<!-- ③ 通用外壳 -->
+<script>
+const $ = (id) => document.getElementById(id)
+function field(label, v, pv) {
+  return `<div class="f${pv !== undefined && String(v) !== String(pv) ? ' changed' : ''}"><b>${label}</b>${v ?? '—'}</div>`
+}
+let state, prev, tab = 0, step = 0
+function dispatch(action) { prev = state; state = Model.reduce(state, action); paint() }
+function reset() { state = Model.init(); prev = state; step = 0; paint() }
+function paint() {
+  $('state').innerHTML = VIEW(state, prev)
+  $('note').innerHTML = state.note ? `刚刚发生：${state.note}` : '点击下方任意按钮开始。蓝框 = 这一步发生变化的字段。'
+  const sc = SCENARIOS[tab]
+  $('tabs').innerHTML = SCENARIOS.map((s, i) => `<button data-tab="${i}" class="${i === tab ? 'on' : ''}">${s.name}</button>`).join('')
+  $('desc').innerHTML = sc.desc
+  $('steps').innerHTML = sc.steps.map((s, i) => `<button data-step="${i}" class="${i < step ? 'done' : i === step ? 'next' : ''}" ${i === step ? '' : 'disabled'}>${i + 1}. ${s.label}</button>`).join('') +
+    (step >= sc.steps.length ? '<p class="ok">✓ 演练完成。可以切换其他场景，或继续自由试玩。</p>' : '')
+}
+$('free').innerHTML = ACTIONS.map((a, i) => `<button data-free="${i}">${a.label}</button>`).join('')
+$('reset').onclick = reset
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button')
+  if (!b) return
+  if (b.dataset.free) dispatch(ACTIONS[b.dataset.free].action)
+  if (b.dataset.tab) { tab = +b.dataset.tab; reset() }
+  if (b.dataset.step) { const s = SCENARIOS[tab].steps[step++]; dispatch(s.action) }
+})
+reset()
+</script>
+</body>
+</html>

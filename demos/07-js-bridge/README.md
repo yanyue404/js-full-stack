@@ -149,6 +149,24 @@ export function setupMockNative() {
 - [ ] 版本兼容检测能正确判断功能是否可用
 - [ ] 代码无 TypeScript 报错
 
+## 参考实现
+
+本目录已附带参考实现：
+
+```bash
+pnpm install && pnpm dev
+```
+
+通过 URL 切换运行环境（页面顶部也有快捷链接）：
+
+| URL                  | 效果                                        |
+| -------------------- | ------------------------------------------- |
+| `/`                  | 普通浏览器，所有能力走 Web 降级             |
+| `/?native=1&v=1.2.0` | 模拟 iOS App，`biometricAuth` 不可用        |
+| `/?native=1&v=1.0.0` | 模拟旧版 App，`openCamera` 也不可用         |
+
+`src/bridge/mockNative.ts` 伪造了 `window.webkit.messageHandlers.nativeBridge`，所以 SDK 走的就是真机上的 iOS 分支。
+
 ## 提示
 
 - `window.webkit?.messageHandlers` 存在说明在 iOS WKWebView 中

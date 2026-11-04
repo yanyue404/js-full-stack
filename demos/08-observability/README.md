@@ -200,6 +200,23 @@ time curl http://localhost/api/users/some-id
 - [ ] 超过限流阈值返回 429 Too Many Requests
 - [ ] 开发环境日志美化输出（pino-pretty），生产环境 JSON 格式
 
+## 参考实现
+
+本目录已附带参考实现，在练习 5 的基础上追加了可观测性：
+
+```bash
+docker compose --env-file .env.development up -d --build
+# 前端 http://localhost · Prometheus http://localhost:9090 · Grafana http://localhost:3001（已预置数据源和 "API Overview" 面板）
+```
+
+没有 Docker 也能体验大部分功能：`cd api && pnpm install && pnpm dev`。此时数据库回退到 PGlite，缓存回退到进程内 Map，`/health` 里 `redis` 显示为 `disabled`。
+
+几个值得动手验证的点：
+
+- 响应头 `X-Cache: MISS` → `HIT`；`PATCH` 之后再次变成 `MISS`（缓存失效）
+- 设置 `REDIS_URL` 指向一个没启动的端口：`/api/health` 返回 503，但用户接口仍然 200（缓存降级到数据库）
+- `/metrics` 只在容器网络内暴露给 Prometheus，Nginx 不对外转发
+
 ## 提示
 
 - pino 的 `child` 方法可以创建带固定上下文的子 logger：`logger.child({ module: 'order' })`

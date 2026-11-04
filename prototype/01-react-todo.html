@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 01 · Todo 状态模型</title>
+<style>
+:root{--a:#2563eb;--bg:#f7f7f8;--fg:#1f2328;--mut:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--a)}
+h1{margin:8px 0 6px;font-size:24px}
+h2{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);letter-spacing:.05em;margin:0 0 10px}
+h2 button{margin:0 0 0 auto}
+.q{color:var(--mut);margin:4px 0}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:10px}
+.f{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.f b{display:block;font-size:12px;color:var(--mut);font-weight:500}
+.changed{border-color:var(--a)!important;background:#eff6ff}
+.note{margin:12px 0 0;padding:8px 12px;border-left:3px solid var(--a);background:#f8fafc}
+button{font:inherit;font-size:14px;padding:6px 12px;margin:0 6px 6px 0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--a);color:var(--a)}
+button:disabled{opacity:.4;cursor:default}
+.tabs button.on{background:var(--a);color:#fff;border-color:var(--a)}
+.steps button.next{border-color:var(--a);color:var(--a);font-weight:600}
+.steps button.done{text-decoration:line-through}
+.ok{color:#15803d}.bad{color:#b91c1c}.warn{color:#b45309}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+th{color:var(--mut);font-weight:500}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <a href="index.html">← 全部原型</a>
+  <h1>第一讲 · 待办事项的状态模型</h1>
+  <p class="q"><b>要回答的问题：</b>"剩余数量""当前可见列表"这类数据应该存进 Store，还是每次从待办列表计算出来？在"筛选 + 完成 + 清除"任意组合下，界面是否始终自洽？</p>
+  <p class="q">PROTOTYPE · 一次性演示，状态只在内存中。可迁入真实代码的是第一个 &lt;script&gt; 里的 <code>TodoModel</code>（对应 Zustand store + selector）。</p>
+
+  <section><h2>当前状态</h2><div id="state"></div><p class="note" id="note"></p></section>
+  <section><h2>自由试玩 <button id="reset">重置</button></h2><div id="free"></div></section>
+  <section><h2>引导式演练</h2><div class="tabs" id="tabs"></div><p id="desc"></p><div class="steps" id="steps"></div></section>
+</main>
+
+<!-- ① 纯逻辑模块：不碰 DOM，可直接迁入 store -->
+<script>
+const TodoModel = {
+  init: () => ({ todos: [], filter: 'all', nextId: 1, note: '' }),
+
+  /** 派生数据：每次计算，不存进状态，永远不会"不同步" */
+  visible: (s) => s.todos.filter((t) => (s.filter === 'all' ? true : s.filter === 'done' ? t.done : !t.done)),
+  remaining: (s) => s.todos.filter((t) => !t.done).length,
+
+  reduce(state, a) {
+    const s = { ...state, todos: state.todos.map((t) => ({ ...t })) }
+    switch (a.type) {
+      case 'add': {
+        const title = a.title.trim()
+        if (!title) return { ...s, note: '❌ 拒绝：标题不能为空，状态没有变化' }
+        s.todos.push({ id: s.nextId, title, done: false })
+        return { ...s, nextId: s.nextId + 1, note: `新增待办「${title}」` }
+      }
+      case 'completeFirst': {
+        const t = s.todos.find((t) => !t.done)
+        if (!t) return { ...s, note: '没有未完成的待办，什么也没发生' }
+        t.done = true
+        const hidden = s.filter === 'active' ? '（当前筛选为"进行中"，它从可见列表里消失了）' : ''
+        return { ...s, note: `完成「${t.title}」${hidden}` }
+      }
+      case 'reopenLast': {
+        const t = [...s.todos].reverse().find((t) => t.done)
+        if (!t) return { ...s, note: '没有已完成的待办，什么也没发生' }
+        t.done = false
+        return { ...s, note: `把「${t.title}」改回未完成` }
+      }
+      case 'removeLast': {
+        const t = s.todos.pop()
+        return { ...s, note: t ? `删除「${t.title}」` : '列表已空，什么也没发生' }
+      }
+      case 'filter':
+        return { ...s, filter: a.filter, note: `筛选切换为「${FILTER_NAME[a.filter]}」——只改了视图，待办本身没变` }
+      case 'clearDone': {
+        const n = s.todos.filter((t) => t.done).length
+        if (!n) return { ...s, note: '没有已完成的待办可清除' }
+        return { ...s, todos: s.todos.filter((t) => !t.done), note: `清除了 ${n} 条已完成待办` }
+      }
+    }
+    return state
+  }
+}
+const FILTER_NAME = { all: '全部', active: '进行中', done: '已完成' }
+</script>
+
+<!-- ② 页面配置：按钮、场景、状态面板 -->
+<script>
+const Model = TodoModel
+const ACTIONS = [
+  { label: '添加「买牛奶」', action: { type: 'add', title: '买牛奶' } },
+  { label: '添加「写周报」', action: { type: 'add', title: '写周报' } },
+  { label: '添加空标题', action: { type: 'add', title: '   ' } },
+  { label: '完成第一条未完成', action: { type: 'completeFirst' } },
+  { label: '撤销最后一条已完成', action: { type: 'reopenLast' } },
+  { label: '删除最后一条', action: { type: 'removeLast' } },
+  { label: '筛选：全部', action: { type: 'filter', filter: 'all' } },
+  { label: '筛选：进行中', action: { type: 'filter', filter: 'active' } },
+  { label: '筛选：已完成', action: { type: 'filter', filter: 'done' } },
+  { label: '清除已完成', action: { type: 'clearDone' } }
+]
+const A = Object.fromEntries(ACTIONS.map((a) => [a.label, a.action]))
+const SCENARIOS = [
+  {
+    name: '日常使用',
+    desc: '添加两条待办，完成一条，再清除已完成。留意"剩余未完成"如何跟着变化——它从来没被手动修改过。',
+    steps: ['添加「买牛奶」', '添加「写周报」', '完成第一条未完成', '清除已完成']
+  },
+  {
+    name: '筛选下完成待办',
+    desc: '在"进行中"筛选下完成一条待办：它会从可见列表消失，但并没有被删除。切回"全部"它还在。如果把可见列表存进 Store，这里就很容易出现不同步。',
+    steps: ['添加「买牛奶」', '添加「写周报」', '筛选：进行中', '完成第一条未完成', '筛选：全部']
+  },
+  {
+    name: '非法操作',
+    desc: '尝试添加空标题、在没有已完成待办时清除——模型应当拒绝或保持不变，而不是产生脏数据。',
+    steps: ['添加空标题', '清除已完成', '撤销最后一条已完成']
+  }
+].map((s) => ({ ...s, steps: s.steps.map((label) => ({ label, action: A[label] })) }))
+
+function VIEW(s, p) {
+  const vis = Model.visible(s).map((t) => t.id)
+  return `<div class="grid">
+    ${field('当前筛选', FILTER_NAME[s.filter], FILTER_NAME[p.filter])}
+    ${field('剩余未完成（计算得出）', Model.remaining(s), Model.remaining(p))}
+    ${field('可见 / 总数', `${vis.length} / ${s.todos.length}`, `${Model.visible(p).length} / ${p.todos.length}`)}
+    ${field('下一个编号', s.nextId, p.nextId)}
+  </div>
+  <table><tr><th>#</th><th>待办</th><th>状态</th><th>在当前筛选下可见？</th></tr>
+  ${s.todos.map((t) => `<tr><td>${t.id}</td><td>${t.title}</td><td>${t.done ? '<span class="ok">已完成</span>' : '未完成'}</td><td>${vis.includes(t.id) ? '是' : '<span class="warn">否（被筛掉）</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="q">暂无待办</td></tr>'}
+  </table>`
+}
+</script>
+
+<!-- ③ 通用外壳 -->
+<script>
+const $ = (id) => document.getElementById(id)
+function field(label, v, pv) {
+  return `<div class="f${pv !== undefined && String(v) !== String(pv) ? ' changed' : ''}"><b>${label}</b>${v ?? '—'}</div>`
+}
+let state, prev, tab = 0, step = 0
+function dispatch(action) { prev = state; state = Model.reduce(state, action); paint() }
+function reset() { state = Model.init(); prev = state; step = 0; paint() }
+function paint() {
+  $('state').innerHTML = VIEW(state, prev)
+  $('note').innerHTML = state.note ? `刚刚发生：${state.note}` : '点击下方任意按钮开始。蓝框 = 这一步发生变化的字段。'
+  const sc = SCENARIOS[tab]
+  $('tabs').innerHTML = SCENARIOS.map((s, i) => `<button data-tab="${i}" class="${i === tab ? 'on' : ''}">${s.name}</button>`).join('')
+  $('desc').innerHTML = sc.desc
+  $('steps').innerHTML = sc.steps.map((s, i) => `<button data-step="${i}" class="${i < step ? 'done' : i === step ? 'next' : ''}" ${i === step ? '' : 'disabled'}>${i + 1}. ${s.label}</button>`).join('') +
+    (step >= sc.steps.length ? '<p class="ok">✓ 演练完成。可以切换其他场景，或继续自由试玩。</p>' : '')
+}
+$('free').innerHTML = ACTIONS.map((a, i) => `<button data-free="${i}">${a.label}</button>`).join('')
+$('reset').onclick = reset
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button')
+  if (!b) return
+  if (b.dataset.free) dispatch(ACTIONS[b.dataset.free].action)
+  if (b.dataset.tab) { tab = +b.dataset.tab; reset() }
+  if (b.dataset.step) { const s = SCENARIOS[tab].steps[step++]; dispatch(s.action) }
+})
+reset()
+</script>
+</body>
+</html>

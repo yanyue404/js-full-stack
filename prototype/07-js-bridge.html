@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 07 · JS Bridge 回调表与超时</title>
+<style>
+:root{--a:#2563eb;--bg:#f7f7f8;--fg:#1f2328;--mut:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--a)}
+h1{margin:8px 0 6px;font-size:24px}
+h2{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);letter-spacing:.05em;margin:0 0 10px}
+h2 button{margin:0 0 0 auto}
+.q{color:var(--mut);margin:4px 0}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:10px}
+.f{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.f b{display:block;font-size:12px;color:var(--mut);font-weight:500}
+.changed{border-color:var(--a)!important;background:#eff6ff}
+.note{margin:12px 0 0;padding:8px 12px;border-left:3px solid var(--a);background:#f8fafc}
+button{font:inherit;font-size:14px;padding:6px 12px;margin:0 6px 6px 0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--a);color:var(--a)}
+button:disabled{opacity:.4;cursor:default}
+.tabs button.on{background:var(--a);color:#fff;border-color:var(--a)}
+.steps button.next{border-color:var(--a);color:var(--a);font-weight:600}
+.steps button.done{text-decoration:line-through}
+.ok{color:#15803d}.bad{color:#b91c1c}.warn{color:#b45309}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+th{color:var(--mut);font-weight:500}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <a href="index.html">← 全部原型</a>
+  <h1>第七讲 · JS Bridge 的回调表、超时与版本兼容</h1>
+  <p class="q"><b>要回答的问题：</b>Web 同时发出多个 Bridge 调用，Native 乱序返回时，<code>callbackId</code> 能否把结果送回正确的 Promise？请求超时之后 Native 才"迟到"回调，会不会重复 resolve？旧版本 App、普通浏览器里调用不存在的能力会怎样？</p>
+  <p class="q">PROTOTYPE · 一次性演示，时间是模拟的。对应真实实现见 <code>demos/07-js-bridge/src/bridge/JSBridge.ts</code>。</p>
+
+  <section><h2>当前状态</h2><div id="state"></div><p class="note" id="note"></p></section>
+  <section><h2>自由试玩 <button id="reset">重置</button></h2><div id="free"></div></section>
+  <section><h2>引导式演练</h2><div class="tabs" id="tabs"></div><p id="desc"></p><div class="steps" id="steps"></div></section>
+</main>
+
+<!-- ① 纯逻辑模块 -->
+<script>
+const REQUIREMENTS = { getDeviceInfo: '1.0.0', share: '1.0.0', openCamera: '1.1.0', biometricAuth: '2.0.0' }
+const TIMEOUT = 3000
+
+function compareVersion(a, b) {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0)
+  return 0
+}
+
+const BridgeModel = {
+  init: () => ({
+    now: 0,
+    platform: 'ios',
+    nativeVersion: '1.2.0',
+    seq: 0,
+    pending: [], // Web 侧回调表：{ id, action, deadline }
+    nativeInbox: [], // Native 已收到、还没处理完的消息
+    results: [],
+    note: ''
+  }),
+
+  supports: (s, action) => s.platform !== 'web' && compareVersion(s.nativeVersion, REQUIREMENTS[action] ?? '1.0.0') >= 0,
+
+  reduce(state, a) {
+    const s = structuredClone(state)
+    const log = (text, cls = '') => s.results.unshift({ t: s.now, text, cls })
+    const say = (n) => ((s.note = n), s)
+    switch (a.type) {
+      case 'call': {
+        if (s.platform === 'web') { log(`${a.action} → reject NOT_NATIVE，走 Web 降级`, 'warn'); return say('不在 App 里，直接走降级方案，不会挂起') }
+        if (!BridgeModel.supports(s, a.action)) { log(`${a.action} → reject UNSUPPORTED（需要 ${REQUIREMENTS[a.action]}）`, 'warn'); return say(`当前 App 版本 ${s.nativeVersion} 不支持 ${a.action}，提示用户升级`) }
+        const id = `cb_${++s.seq}`
+        s.pending.push({ id, action: a.action, deadline: s.now + TIMEOUT })
+        s.nativeInbox.push({ id, action: a.action })
+        return say(`Web 调用 ${a.action}，登记回调 ${id}，${TIMEOUT / 1000} 秒后超时`)
+      }
+      case 'reply': {
+        if (!s.nativeInbox.length) return say('Native 没有待处理的消息')
+        const msg = a.newest ? s.nativeInbox.pop() : s.nativeInbox.shift()
+        const i = s.pending.findIndex((p) => p.id === msg.id)
+        if (i === -1) { log(`${msg.id} 迟到的回调已被忽略（早已超时）`, 'q'); return say(`Native 回调 ${msg.id}，但回调表里已经没有它了——忽略，不会重复 resolve`) }
+        s.pending.splice(i, 1)
+        log(`${msg.id} ${msg.action} → resolve`, 'ok')
+        return say(`Native 回调 ${msg.id}，按 id 找到对应的 Promise 并 resolve`)
+      }
+      case 'tick': {
+        s.now += 1000
+        const expired = s.pending.filter((p) => p.deadline <= s.now)
+        s.pending = s.pending.filter((p) => p.deadline > s.now)
+        expired.forEach((p) => log(`${p.id} ${p.action} → reject TIMEOUT`, 'bad'))
+        return say(`时间 +1 秒${expired.length ? `，${expired.map((p) => p.id).join('、')} 超时并从回调表删除` : ''}`)
+      }
+      case 'version':
+        s.nativeVersion = a.v
+        return say(`切换为 App 版本 ${a.v}`)
+      case 'platform':
+        s.platform = a.p
+        return say(a.p === 'web' ? '切换为普通浏览器（没有 window.webkit.messageHandlers）' : '切换为 iOS App')
+    }
+    return state
+  }
+}
+const Model = BridgeModel
+</script>
+
+<!-- ② 页面配置 -->
+<script>
+const ACTIONS = [
+  { label: '调用 getDeviceInfo', action: { type: 'call', action: 'getDeviceInfo' } },
+  { label: '调用 share', action: { type: 'call', action: 'share' } },
+  { label: '调用 openCamera', action: { type: 'call', action: 'openCamera' } },
+  { label: '调用 biometricAuth', action: { type: 'call', action: 'biometricAuth' } },
+  { label: 'Native 回复最早的消息', action: { type: 'reply' } },
+  { label: 'Native 回复最新的消息', action: { type: 'reply', newest: true } },
+  { label: '时间 +1 秒', action: { type: 'tick' } },
+  { label: 'App 版本 1.0.0', action: { type: 'version', v: '1.0.0' } },
+  { label: 'App 版本 2.0.0', action: { type: 'version', v: '2.0.0' } },
+  { label: '切到普通浏览器', action: { type: 'platform', p: 'web' } },
+  { label: '切回 iOS App', action: { type: 'platform', p: 'ios' } }
+]
+const A = Object.fromEntries(ACTIONS.map((a) => [a.label, a.action]))
+const SCENARIOS = [
+  { name: '一次往返', desc: 'Web 发消息时登记一个 callbackId，Native 处理完带着同一个 id 回调。', steps: ['调用 getDeviceInfo', 'Native 回复最早的消息'] },
+  { name: '乱序回调', desc: '先后发出两个调用，Native 先处理完后发的那个。每个结果都通过 id 回到自己的 Promise，不会串。', steps: ['调用 getDeviceInfo', '调用 share', 'Native 回复最新的消息', 'Native 回复最早的消息'] },
+  { name: '超时 + 迟到回调', desc: 'Native 卡住了，3 秒后 Web 侧超时 reject 并删除回调。之后 Native 才回调——因为回调表里已经没有这个 id，它被安全忽略。', steps: ['调用 share', '时间 +1 秒', '时间 +1 秒', '时间 +1 秒', 'Native 回复最早的消息'] },
+  { name: '版本与环境', desc: '旧版 App 不支持 openCamera，普通浏览器里所有调用立即走降级——都不会让 Promise 永远挂起。', steps: ['App 版本 1.0.0', '调用 openCamera', 'App 版本 2.0.0', '调用 biometricAuth', 'Native 回复最早的消息', '切到普通浏览器', '调用 getDeviceInfo'] }
+].map((s) => ({ ...s, steps: s.steps.map((label) => ({ label, action: A[label] })) }))
+
+function VIEW(s, p) {
+  const ids = (list) => list.map((x) => x.id).join('、') || '空'
+  return `<div class="grid">
+    ${field('模拟时间', `${s.now / 1000} 秒`, `${p.now / 1000} 秒`)}
+    ${field('运行环境', s.platform === 'web' ? '普通浏览器' : `iOS App v${s.nativeVersion}`, p.platform === 'web' ? '普通浏览器' : `iOS App v${p.nativeVersion}`)}
+    ${field('Web 回调表（等待中）', ids(s.pending), ids(p.pending))}
+    ${field('Native 待处理消息', ids(s.nativeInbox), ids(p.nativeInbox))}
+  </div>
+  <div class="cols">
+    <table><tr><th>能力</th><th>最低版本</th><th>当前可用？</th></tr>
+      ${Object.entries(REQUIREMENTS).map(([k, v]) => `<tr><td>${k}</td><td>${v}</td><td>${Model.supports(s, k) ? '<span class="ok">是</span>' : '<span class="bad">否</span>'}</td></tr>`).join('')}
+    </table>
+    <table><tr><th>Promise 结果（新的在上）</th></tr>
+      ${s.results.map((r) => `<tr><td class="${r.cls}">${r.t / 1000}s · ${r.text}</td></tr>`).join('') || '<tr><td class="q">暂无</td></tr>'}
+    </table>
+  </div>`
+}
+</script>
+
+<!-- ③ 通用外壳 -->
+<script>
+const $ = (id) => document.getElementById(id)
+function field(label, v, pv) {
+  return `<div class="f${pv !== undefined && String(v) !== String(pv) ? ' changed' : ''}"><b>${label}</b>${v ?? '—'}</div>`
+}
+let state, prev, tab = 0, step = 0
+function dispatch(action) { prev = state; state = Model.reduce(state, action); paint() }
+function reset() { state = Model.init(); prev = state; step = 0; paint() }
+function paint() {
+  $('state').innerHTML = VIEW(state, prev)
+  $('note').innerHTML = state.note ? `刚刚发生：${state.note}` : '点击下方任意按钮开始。蓝框 = 这一步发生变化的字段。'
+  const sc = SCENARIOS[tab]
+  $('tabs').innerHTML = SCENARIOS.map((s, i) => `<button data-tab="${i}" class="${i === tab ? 'on' : ''}">${s.name}</button>`).join('')
+  $('desc').innerHTML = sc.desc
+  $('steps').innerHTML = sc.steps.map((s, i) => `<button data-step="${i}" class="${i < step ? 'done' : i === step ? 'next' : ''}" ${i === step ? '' : 'disabled'}>${i + 1}. ${s.label}</button>`).join('') +
+    (step >= sc.steps.length ? '<p class="ok">✓ 演练完成。可以切换其他场景，或继续自由试玩。</p>' : '')
+}
+$('free').innerHTML = ACTIONS.map((a, i) => `<button data-free="${i}">${a.label}</button>`).join('')
+$('reset').onclick = reset
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button')
+  if (!b) return
+  if (b.dataset.free) dispatch(ACTIONS[b.dataset.free].action)
+  if (b.dataset.tab) { tab = +b.dataset.tab; reset() }
+  if (b.dataset.step) { const s = SCENARIOS[tab].steps[step++]; dispatch(s.action) }
+})
+reset()
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# 开发环境覆盖：暴露数据库 / Redis / API 端口，日志改为 debug（/metrics 也可通过 :8080 直接访问）
+# docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.development up -d --build
+services:
+  db:
+    ports:
+      - '5432:5432'
+  redis:
+    ports:
+      - '6379:6379'
+  api:
+    ports:
+      - '8080:8080'
+    environment:
+      LOG_LEVEL: debug

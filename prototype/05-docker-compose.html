@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 05 · Compose 启动顺序与数据卷</title>
+<style>
+:root{--a:#2563eb;--bg:#f7f7f8;--fg:#1f2328;--mut:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--a)}
+h1{margin:8px 0 6px;font-size:24px}
+h2{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);letter-spacing:.05em;margin:0 0 10px}
+h2 button{margin:0 0 0 auto}
+.q{color:var(--mut);margin:4px 0}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:10px}
+.f{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.f b{display:block;font-size:12px;color:var(--mut);font-weight:500}
+.changed{border-color:var(--a)!important;background:#eff6ff}
+.note{margin:12px 0 0;padding:8px 12px;border-left:3px solid var(--a);background:#f8fafc}
+button{font:inherit;font-size:14px;padding:6px 12px;margin:0 6px 6px 0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--a);color:var(--a)}
+button:disabled{opacity:.4;cursor:default}
+.tabs button.on{background:var(--a);color:#fff;border-color:var(--a)}
+.steps button.next{border-color:var(--a);color:var(--a);font-weight:600}
+.steps button.done{text-decoration:line-through}
+.ok{color:#15803d}.bad{color:#b91c1c}.warn{color:#b45309}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+th{color:var(--mut);font-weight:500}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <a href="index.html">← 全部原型</a>
+  <h1>第五讲 · Compose 启动顺序、健康检查与数据卷</h1>
+  <p class="q"><b>要回答的问题：</b><code>depends_on</code> 只写服务名和加上 <code>condition: service_healthy</code> 有什么区别？为什么 API 会在"数据库明明启动了"的时候连不上？<code>docker compose down</code> 和 <code>down -v</code> 对数据分别意味着什么？</p>
+  <p class="q">PROTOTYPE · 一次性演示，每次"时间推进"代表 5 秒。对应真实配置见 <code>demos/05-docker-deploy/docker-compose.yml</code>。</p>
+
+  <section><h2>当前状态</h2><div id="state"></div><p class="note" id="note"></p></section>
+  <section><h2>自由试玩 <button id="reset">重置</button></h2><div id="free"></div></section>
+  <section><h2>引导式演练</h2><div class="tabs" id="tabs"></div><p id="desc"></p><div class="steps" id="steps"></div></section>
+</main>
+
+<!-- ① 纯逻辑模块 -->
+<script>
+// 数据库进程启动需要 2 个时间片才能接受连接（pg_isready 通过）
+const DB_READY_TICKS = 2
+
+const ComposeModel = {
+  init: () => ({
+    waitHealthy: true,
+    svc: { db: 'stopped', api: 'stopped', web: 'stopped', nginx: 'stopped' },
+    dbTicks: 0,
+    volume: null, // { rows } —— 命名卷 pg-data
+    lastCurl: null,
+    note: ''
+  }),
+
+  reduce(state, a) {
+    const s = structuredClone(state)
+    const say = (n) => ((s.note = n), s)
+    switch (a.type) {
+      case 'toggle':
+        s.waitHealthy = !s.waitHealthy
+        return say(s.waitHealthy ? 'api 改为 depends_on: db: condition: service_healthy' : 'api 改为 depends_on: [db]（只等容器启动，不等数据库就绪）')
+      case 'up': {
+        if (s.svc.db !== 'stopped') return say('服务已在运行')
+        const created = !s.volume
+        if (created) s.volume = { rows: 0 }
+        s.svc.db = 'starting'
+        s.dbTicks = 0
+        s.svc.api = s.waitHealthy ? 'waiting' : 'starting'
+        s.svc.web = 'running'
+        s.svc.nginx = 'running'
+        return say(`docker compose up：${created ? '创建卷 pg-data；' : '复用已有卷 pg-data；'}db 启动中，api ${s.waitHealthy ? '等待 db 健康' : '立刻启动'}`)
+      }
+      case 'tick': {
+        const msgs = []
+        if (s.svc.db === 'starting' && ++s.dbTicks >= DB_READY_TICKS) {
+          s.svc.db = 'healthy'
+          msgs.push('db 健康检查通过')
+        }
+        if (s.svc.api === 'starting') {
+          s.svc.api = s.svc.db === 'healthy' ? 'running' : 'crashed'
+          msgs.push(s.svc.api === 'running' ? 'api 连上数据库' : 'api 连接数据库失败：ECONNREFUSED，进程退出')
+        } else if (s.svc.api === 'waiting' && s.svc.db === 'healthy') {
+          s.svc.api = 'running'
+          msgs.push('db 已健康，api 开始启动并连上数据库')
+        }
+        return say(`时间 +5 秒。${msgs.join('；') || '没有变化'}`)
+      }
+      case 'restartApi':
+        if (s.svc.api !== 'crashed') return say('api 没有崩溃')
+        s.svc.api = s.svc.db === 'healthy' ? 'running' : 'crashed'
+        return say(`restart: unless-stopped 自动重启 api → ${s.svc.api === 'running' ? '这次连上了' : '又失败了'}`)
+      case 'curl': {
+        let r
+        if (s.svc.nginx !== 'running') r = 'curl: (7) Failed to connect to localhost port 80'
+        else if (s.svc.api !== 'running') r = '502 Bad Gateway（Nginx 在，但 api 不可用）'
+        else r = `200 {"status":"ok","users":${s.volume.rows}}`
+        s.lastCurl = r
+        return say(`curl http://localhost/api/health → ${r}`)
+      }
+      case 'insert':
+        if (s.svc.api !== 'running') return say('❌ api 不可用，写入失败')
+        s.volume.rows++
+        return say('POST /api/users：写入一行，数据落在卷 pg-data 里')
+      case 'down':
+      case 'downV':
+        for (const k in s.svc) s.svc[k] = 'stopped'
+        s.dbTicks = 0
+        if (a.type === 'downV') {
+          s.volume = null
+          return say('docker compose down -v：容器和卷一起删除，数据没了')
+        }
+        return say('docker compose down：删除容器，但卷 pg-data 保留')
+    }
+    return state
+  }
+}
+const Model = ComposeModel
+</script>
+
+<!-- ② 页面配置 -->
+<script>
+const ACTIONS = [
+  { label: 'docker compose up', action: { type: 'up' } },
+  { label: '时间推进 5 秒', action: { type: 'tick' } },
+  { label: 'curl /api/health', action: { type: 'curl' } },
+  { label: '写入一个用户', action: { type: 'insert' } },
+  { label: 'api 自动重启', action: { type: 'restartApi' } },
+  { label: 'docker compose down', action: { type: 'down' } },
+  { label: 'docker compose down -v', action: { type: 'downV' } },
+  { label: '切换 depends_on 写法', action: { type: 'toggle' } }
+]
+const A = Object.fromEntries(ACTIONS.map((a) => [a.label, a.action]))
+const SCENARIOS = [
+  {
+    name: '正确的启动顺序',
+    desc: '配置了 <code>condition: service_healthy</code>：api 一直等到数据库健康检查通过才启动。写入数据后 <code>down</code> 再 <code>up</code>，数据仍在。',
+    steps: ['docker compose up', '时间推进 5 秒', '时间推进 5 秒', 'curl /api/health', '写入一个用户', 'docker compose down', 'docker compose up', '时间推进 5 秒', '时间推进 5 秒', 'curl /api/health']
+  },
+  {
+    name: '只写 depends_on',
+    desc: '"容器启动了"不等于"数据库能接受连接了"。api 抢先启动、连接失败退出，Nginx 返回 502。靠 <code>restart</code> 策略重启能碰运气恢复，但不可靠。',
+    steps: ['切换 depends_on 写法', 'docker compose up', '时间推进 5 秒', 'curl /api/health', '时间推进 5 秒', 'api 自动重启', 'curl /api/health']
+  },
+  {
+    name: 'down -v 丢数据',
+    desc: '<code>-v</code> 会删除命名卷。在生产服务器上手滑执行它，就是一次数据事故。',
+    steps: ['docker compose up', '时间推进 5 秒', '时间推进 5 秒', '写入一个用户', 'docker compose down -v', 'docker compose up', '时间推进 5 秒', '时间推进 5 秒', 'curl /api/health']
+  }
+].map((s) => ({ ...s, steps: s.steps.map((label) => ({ label, action: A[label] })) }))
+
+const LABEL = { stopped: '<span class="q">未运行</span>', starting: '<span class="warn">启动中</span>', waiting: '<span class="warn">等待依赖</span>', healthy: '<span class="ok">健康</span>', running: '<span class="ok">运行中</span>', crashed: '<span class="bad">已崩溃</span>' }
+function VIEW(s, p) {
+  return `<div class="grid">
+    ${['db', 'api', 'web', 'nginx'].map((k) => field(k, LABEL[s.svc[k]], LABEL[p.svc[k]])).join('')}
+    ${field('api 的 depends_on', s.waitHealthy ? 'service_healthy' : '仅服务名', p.waitHealthy ? 'service_healthy' : '仅服务名')}
+    ${field('卷 pg-data', s.volume ? `存在 · ${s.volume.rows} 个用户` : '<span class="bad">不存在</span>', p.volume ? `存在 · ${p.volume.rows} 个用户` : '<span class="bad">不存在</span>')}
+    ${field('最近一次 curl', s.lastCurl ?? '—', p.lastCurl ?? '—')}
+  </div>`
+}
+</script>
+
+<!-- ③ 通用外壳 -->
+<script>
+const $ = (id) => document.getElementById(id)
+function field(label, v, pv) {
+  return `<div class="f${pv !== undefined && String(v) !== String(pv) ? ' changed' : ''}"><b>${label}</b>${v ?? '—'}</div>`
+}
+let state, prev, tab = 0, step = 0
+function dispatch(action) { prev = state; state = Model.reduce(state, action); paint() }
+function reset() { state = Model.init(); prev = state; step = 0; paint() }
+function paint() {
+  $('state').innerHTML = VIEW(state, prev)
+  $('note').innerHTML = state.note ? `刚刚发生：${state.note}` : '点击下方任意按钮开始。蓝框 = 这一步发生变化的字段。'
+  const sc = SCENARIOS[tab]
+  $('tabs').innerHTML = SCENARIOS.map((s, i) => `<button data-tab="${i}" class="${i === tab ? 'on' : ''}">${s.name}</button>`).join('')
+  $('desc').innerHTML = sc.desc
+  $('steps').innerHTML = sc.steps.map((s, i) => `<button data-step="${i}" class="${i < step ? 'done' : i === step ? 'next' : ''}" ${i === step ? '' : 'disabled'}>${i + 1}. ${s.label}</button>`).join('') +
+    (step >= sc.steps.length ? '<p class="ok">✓ 演练完成。可以切换其他场景，或继续自由试玩。</p>' : '')
+}
+$('free').innerHTML = ACTIONS.map((a, i) => `<button data-free="${i}">${a.label}</button>`).join('')
+$('reset').onclick = reset
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button')
+  if (!b) return
+  if (b.dataset.free) dispatch(ACTIONS[b.dataset.free].action)
+  if (b.dataset.tab) { tab = +b.dataset.tab; reset() }
+  if (b.dataset.step) { const s = SCENARIOS[tab].steps[step++]; dispatch(s.action) }
+})
+reset()
+</script>
+</body>
+</html>

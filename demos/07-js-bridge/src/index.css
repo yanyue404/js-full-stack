@@ -1,0 +1,84 @@
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, 'PingFang SC', sans-serif;
+  background: #f2f3f5;
+  color: #1f2328;
+}
+main {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: env(safe-area-inset-top) 12px calc(24px + env(safe-area-inset-bottom));
+}
+.env {
+  padding: 12px;
+  margin: 12px 0;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.env.native {
+  background: #dcfce7;
+}
+.env.web {
+  background: #fef3c7;
+}
+.env nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+section {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+button {
+  margin: 0 6px 6px 0;
+  padding: 6px 10px;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #2563eb;
+  cursor: pointer;
+}
+dl div {
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+}
+dt {
+  color: #656d76;
+  width: 90px;
+}
+dd {
+  margin: 0;
+}
+ul {
+  padding-left: 18px;
+  font-size: 14px;
+}
+.warn {
+  color: #b45309;
+  font-size: 13px;
+}
+.native-side {
+  border-top: 1px dashed #d0d7de;
+  padding-top: 8px;
+}
+.native-side small {
+  display: block;
+  color: #656d76;
+  margin-bottom: 6px;
+}
+pre {
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow: auto;
+}

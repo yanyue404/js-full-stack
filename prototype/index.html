@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>全栈前端工程师 · 八讲逻辑原型</title>
+<style>
+:root{--a:#2563eb;--bg:#f7f7f8;--fg:#1f2328;--mut:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--a)}
+h1{margin:8px 0 6px;font-size:24px}
+h2{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);letter-spacing:.05em;margin:0 0 10px}
+h2 button{margin:0 0 0 auto}
+.q{color:var(--mut);margin:4px 0}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:10px}
+.f{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.f b{display:block;font-size:12px;color:var(--mut);font-weight:500}
+.changed{border-color:var(--a)!important;background:#eff6ff}
+.note{margin:12px 0 0;padding:8px 12px;border-left:3px solid var(--a);background:#f8fafc}
+button{font:inherit;font-size:14px;padding:6px 12px;margin:0 6px 6px 0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--a);color:var(--a)}
+button:disabled{opacity:.4;cursor:default}
+.tabs button.on{background:var(--a);color:#fff;border-color:var(--a)}
+.steps button.next{border-color:var(--a);color:var(--a);font-weight:600}
+.steps button.done{text-decoration:line-through}
+.ok{color:#15803d}.bad{color:#b91c1c}.warn{color:#b45309}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+th{color:var(--mut);font-weight:500}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+<style>
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:16px}
+.cards a{display:block;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;color:inherit;text-decoration:none}
+.cards a:hover{border-color:var(--a)}
+.cards small{color:var(--a);font-weight:600}
+.cards p{margin:6px 0 0;color:var(--mut);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>全栈前端工程师 · 八讲逻辑原型</h1>
+  <p class="q">每一讲挑出一个"纸面上看起来没问题、推几步就容易出错"的状态模型，做成可以直接双击打开的单文件演示。不需要安装任何东西，也可以发给产品、设计同学一起点。</p>
+  <p class="q">每个页面都分为：<b>当前状态</b>（蓝框表示刚刚变化的字段）→ <b>自由试玩</b>（任意顺序点按钮）→ <b>引导式演练</b>（预设的正常路径、边界情况和非法操作）。</p>
+
+  <div class="cards">
+    <a href="01-react-todo.html"><small>第一讲 · React</small><b><br>待办事项的状态模型</b><p>派生数据该存还是该算？筛选 + 完成 + 清除组合下界面是否自洽。</p></a>
+    <a href="02-ts-async-state.html"><small>第二讲 · TypeScript</small><b><br>用类型消灭非法状态</b><p>可辨识联合 vs 三个布尔字段：重试、迟到响应时谁会出错。</p></a>
+    <a href="03-node-auth.html"><small>第三讲 · Node.js</small><b><br>双 Token 刷新与 RBAC</b><p>无感续期、越权 403、被盗 Refresh Token 重放检测。</p></a>
+    <a href="04-db-transaction-lock.html"><small>第四讲 · 数据库</small><b><br>事务、乐观锁与软删除</b><p>回滚不留残留，WHERE version = ? 拦住并发覆盖。</p></a>
+    <a href="05-docker-compose.html"><small>第五讲 · Docker</small><b><br>启动顺序、健康检查与数据卷</b><p>service_healthy 的意义，down 与 down -v 的区别。</p></a>
+    <a href="06-ai-fallback.html"><small>第六讲 · AI</small><b><br>重试、降级、工具调用与上下文</b><p>429 重试、400 直接切换、全部失败兜底、按轮裁剪上下文。</p></a>
+    <a href="07-js-bridge.html"><small>第七讲 · 混合开发</small><b><br>JS Bridge 回调表与超时</b><p>乱序回调、超时后迟到回调、版本兼容与 Web 降级。</p></a>
+    <a href="08-rate-limit-breaker.html"><small>第八讲 · 生产实战</small><b><br>限流、熔断与降级</b><p>熔断器关闭 → 打开 → 半开的完整状态机，叠加限流与缓存降级。</p></a>
+  </div>
+
+  <p class="q" style="margin-top:24px">这些原型是一次性的：验证过的逻辑已经落进 <a href="../demos/README.md">demos/</a> 的参考实现和 <a href="../capstone/README.md">capstone/</a> 综合项目，页面本身不进生产。</p>
+</main>
+</body>
+</html>

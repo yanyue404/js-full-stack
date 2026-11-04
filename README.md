@@ -34,7 +34,11 @@
 
 ## 课堂练习
 
-每一讲都配有对应的[课堂练习](demos)，请在学习过程中动手完成。
+每一讲都配有对应的[课堂练习](demos)，请在学习过程中动手完成。每个练习目录都附带参考实现，卡住时再对照。
+
+## 逻辑原型
+
+[prototype/](prototype/index.html) 为每一讲准备了一个可直接双击打开的单文件演示（无需安装），把每讲最容易"纸上没问题、一推就出错"的状态模型做成可点击的引导式演练：Todo 派生状态、可辨识联合、双 Token 轮换、事务与乐观锁、Compose 启动顺序、AI 重试降级、JS Bridge 回调超时、限流熔断。
 
 ---
 
@@ -195,6 +199,8 @@
 - Docker 容器化 + CI/CD 部署
 - 至少一个 AI 功能模块
 - 日志与基础监控
+
+**参考实现：**[capstone/ — TeamBoard 团队任务看板](capstone/README.md)（多租户 + RBAC + 乐观锁 + AI 任务拆解 + Docker + GitHub Actions + Prometheus/Grafana）。
 
 ## 参考资源
 

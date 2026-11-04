@@ -161,6 +161,17 @@ async function getProjectWithTasks(projectId: string) {
 - [ ] 列表查询无 N+1 问题
 - [ ] 软删除生效（删除后查不到，但数据库中记录仍在）
 
+## 参考实现
+
+本目录已附带参考实现，先自己做，卡住再对照：
+
+```bash
+pnpm install
+cp .env.example .env   # 使用 Docker 中的 PostgreSQL；没有 Docker 可跳过，自动使用 PGlite（./.pglite）
+pnpm db:setup          # migrate + seed
+pnpm dev               # 逐项运行上面的验证标准，全部打印 ✅ 即通过
+```
+
 ## 提示
 
 - 使用 `drizzle-kit studio` 可以可视化查看数据库内容

@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 03 · 双 Token 刷新与权限</title>
+<style>
+:root{--a:#2563eb;--bg:#f7f7f8;--fg:#1f2328;--mut:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--a)}
+h1{margin:8px 0 6px;font-size:24px}
+h2{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);letter-spacing:.05em;margin:0 0 10px}
+h2 button{margin:0 0 0 auto}
+.q{color:var(--mut);margin:4px 0}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:10px}
+.f{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.f b{display:block;font-size:12px;color:var(--mut);font-weight:500}
+.changed{border-color:var(--a)!important;background:#eff6ff}
+.note{margin:12px 0 0;padding:8px 12px;border-left:3px solid var(--a);background:#f8fafc}
+button{font:inherit;font-size:14px;padding:6px 12px;margin:0 6px 6px 0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--a);color:var(--a)}
+button:disabled{opacity:.4;cursor:default}
+.tabs button.on{background:var(--a);color:#fff;border-color:var(--a)}
+.steps button.next{border-color:var(--a);color:var(--a);font-weight:600}
+.steps button.done{text-decoration:line-through}
+.ok{color:#15803d}.bad{color:#b91c1c}.warn{color:#b45309}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+th{color:var(--mut);font-weight:500}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <a href="index.html">← 全部原型</a>
+  <h1>第三讲 · 双 Token 刷新、令牌轮换与 RBAC</h1>
+  <p class="q"><b>要回答的问题：</b>短期 Access Token（15 分钟）+ 长期 Refresh Token（7 天）+ "每次刷新都换新 Refresh Token"的方案，能否同时做到：用户无感续期、成员越权被拒、<b>被盗的 Refresh Token 一旦被重放就让整条会话失效</b>？</p>
+  <p class="q">PROTOTYPE · 一次性演示，时间是模拟的。可迁入真实代码的是 <code>AuthModel</code>（对应 <code>authService</code> + <code>authMiddleware</code> + <code>requireRole</code>）。</p>
+
+  <section><h2>当前状态</h2><div id="state"></div><p class="note" id="note"></p></section>
+  <section><h2>自由试玩 <button id="reset">重置</button></h2><div id="free"></div></section>
+  <section><h2>引导式演练</h2><div class="tabs" id="tabs"></div><p id="desc"></p><div class="steps" id="steps"></div></section>
+</main>
+
+<!-- ① 纯逻辑模块 -->
+<script>
+const ACCESS_TTL = 15
+const REFRESH_TTL = 7 * 24 * 60
+
+const AuthModel = {
+  init: () => ({
+    now: 0,
+    seq: 0,
+    user: null, // { name, role }
+    client: { access: null, refresh: null },
+    attacker: { access: null, refresh: null },
+    // 服务端 refresh token 表：id → { family, used, exp }
+    store: {},
+    revokedFamilies: [],
+    lastResponse: null,
+    note: ''
+  }),
+
+  reduce(state, a) {
+    const s = structuredClone(state)
+    const issue = (family) => {
+      const id = `rt_${++s.seq}`
+      s.store[id] = { family, used: false, exp: s.now + REFRESH_TTL }
+      return { access: { exp: s.now + ACCESS_TTL, family }, refresh: id }
+    }
+    const respond = (code, text) => {
+      s.lastResponse = { code, text }
+      s.note = `${code} ${text}`
+      return s
+    }
+
+    switch (a.type) {
+      case 'login': {
+        s.user = { name: a.role === 'admin' ? '管理员 Ada' : '成员 Bob', role: a.role }
+        s.client = issue(`fam_${s.seq + 1}`)
+        s.attacker = { access: null, refresh: null }
+        return respond(200, `${s.user.name} 登录成功，拿到 Access Token（15 分钟）和 Refresh Token（7 天）`)
+      }
+      case 'tick':
+        s.now += a.minutes
+        s.note = `时间过去了 ${a.minutes} 分钟`
+        return s
+      case 'request': {
+        const who = s[a.who]
+        const tok = who.access
+        if (!tok) return respond(401, '缺少 Authorization 头')
+        if (s.revokedFamilies.includes(tok.family)) return respond(401, '会话已被注销')
+        if (s.now >= tok.exp) return respond(401, 'TOKEN_EXPIRED：Access Token 已过期，请用 Refresh Token 续期')
+        if (a.resource === 'admin' && s.user.role !== 'admin') return respond(403, '权限不足：只有管理员能删除用户')
+        return respond(200, a.resource === 'admin' ? '已删除用户' : `返回 ${s.user.name} 的个人资料`)
+      }
+      case 'refresh': {
+        const who = s[a.who]
+        const rec = who.refresh && s.store[who.refresh]
+        const label = a.who === 'attacker' ? '攻击者' : '用户'
+        if (!rec || s.revokedFamilies.includes(rec.family)) {
+          s[a.who] = { access: null, refresh: null }
+          return respond(401, `${label}的 Refresh Token 无效，需要重新登录`)
+        }
+        if (rec.used) {
+          // 已用过的令牌又出现 → 一定有人复制了它，注销整个家族
+          s.revokedFamilies.push(rec.family)
+          s[a.who] = { access: null, refresh: null }
+          return respond(401, `🚨 检测到 Refresh Token 重放（${label}使用了已轮换的旧令牌），该会话的所有令牌全部作废`)
+        }
+        if (s.now >= rec.exp) return respond(401, 'Refresh Token 已过期，需要重新登录')
+        rec.used = true
+        s[a.who] = issue(rec.family)
+        return respond(200, `${label}续期成功：旧 Refresh Token 作废，换发了一对新令牌`)
+      }
+      case 'steal':
+        if (!s.client.refresh) { s.note = '用户没有 Refresh Token 可偷'; return s }
+        s.attacker = { access: null, refresh: s.client.refresh }
+        s.note = `攻击者复制了用户当前的 Refresh Token（${s.client.refresh}）`
+        return s
+      case 'logout': {
+        const rec = s.store[s.client.refresh]
+        if (rec) s.revokedFamilies.push(rec.family)
+        s.client = { access: null, refresh: null }
+        return respond(200, '已登出，服务端作废了这条会话的所有 Refresh Token')
+      }
+    }
+    return state
+  }
+}
+const Model = AuthModel
+</script>
+
+<!-- ② 页面配置 -->
+<script>
+const ACTIONS = [
+  { label: '成员 Bob 登录', action: { type: 'login', role: 'member' } },
+  { label: '管理员 Ada 登录', action: { type: 'login', role: 'admin' } },
+  { label: '时间 +10 分钟', action: { type: 'tick', minutes: 10 } },
+  { label: '访问「我的资料」', action: { type: 'request', who: 'client', resource: 'profile' } },
+  { label: '访问「删除用户」', action: { type: 'request', who: 'client', resource: 'admin' } },
+  { label: '用户刷新 Token', action: { type: 'refresh', who: 'client' } },
+  { label: '攻击者窃取 Refresh Token', action: { type: 'steal' } },
+  { label: '攻击者用偷来的令牌刷新', action: { type: 'refresh', who: 'attacker' } },
+  { label: '登出', action: { type: 'logout' } }
+]
+const A = Object.fromEntries(ACTIONS.map((a) => [a.label, a.action]))
+const SCENARIOS = [
+  {
+    name: '无感续期',
+    desc: '登录后过了 20 分钟，Access Token 过期，接口返回 <code>TOKEN_EXPIRED</code>。前端拦截器拿 Refresh Token 换一对新令牌，再重试原请求——用户全程无感。',
+    steps: ['成员 Bob 登录', '访问「我的资料」', '时间 +10 分钟', '时间 +10 分钟', '访问「我的资料」', '用户刷新 Token', '访问「我的资料」']
+  },
+  {
+    name: '越权访问',
+    desc: '认证（你是谁）通过不等于授权（你能做什么）通过：成员访问管理员接口得到 403，而不是 401。',
+    steps: ['成员 Bob 登录', '访问「删除用户」', '管理员 Ada 登录', '访问「删除用户」']
+  },
+  {
+    name: '令牌被盗',
+    desc: '攻击者复制了 Refresh Token。用户随后正常刷新，旧令牌被标记为"已使用"。攻击者再拿旧令牌来刷新——服务端发现同一令牌被用了两次，直接注销整条会话，连用户的新令牌也作废，逼双方重新登录。',
+    steps: ['成员 Bob 登录', '攻击者窃取 Refresh Token', '用户刷新 Token', '攻击者用偷来的令牌刷新', '访问「我的资料」', '用户刷新 Token']
+  }
+].map((s) => ({ ...s, steps: s.steps.map((label) => ({ label, action: A[label] })) }))
+
+function tokenText(s, holder) {
+  const t = s[holder]
+  if (!t.access && !t.refresh) return '<span class="q">无</span>'
+  const acc = t.access
+    ? s.revokedFamilies.includes(t.access.family) ? '<span class="bad">已注销</span>'
+      : s.now >= t.access.exp ? '<span class="bad">已过期</span>' : `<span class="ok">剩 ${t.access.exp - s.now} 分钟</span>`
+    : '—'
+  return `Access：${acc}<br>Refresh：${t.refresh ?? '—'}`
+}
+function VIEW(s, p) {
+  const r = s.lastResponse
+  const cls = !r ? '' : r.code < 300 ? 'ok' : 'bad'
+  return `<div class="grid">
+    ${field('模拟时间', `第 ${s.now} 分钟`, `第 ${p.now} 分钟`)}
+    ${field('当前用户', s.user ? `${s.user.name}（${s.user.role}）` : '未登录', p.user ? `${p.user.name}（${p.user.role}）` : '未登录')}
+    ${field('用户手里的令牌', tokenText(s, 'client'), tokenText(p, 'client'))}
+    ${field('攻击者手里的令牌', tokenText(s, 'attacker'), tokenText(p, 'attacker'))}
+    ${field('上一次响应', r ? `<span class="${cls}">${r.code}</span>` : '—', p.lastResponse?.code)}
+  </div>
+  <table><tr><th>服务端 Refresh Token 表</th><th>会话</th><th>状态</th></tr>
+  ${Object.entries(s.store).map(([id, rec]) => `<tr><td>${id}</td><td>${rec.family}</td><td>${s.revokedFamilies.includes(rec.family) ? '<span class="bad">会话已注销</span>' : rec.used ? '<span class="warn">已轮换（再出现即视为被盗）</span>' : '<span class="ok">有效</span>'}</td></tr>`).join('') || '<tr><td colspan="3" class="q">空</td></tr>'}
+  </table>`
+}
+</script>
+
+<!-- ③ 通用外壳 -->
+<script>
+const $ = (id) => document.getElementById(id)
+function field(label, v, pv) {
+  return `<div class="f${pv !== undefined && String(v) !== String(pv) ? ' changed' : ''}"><b>${label}</b>${v ?? '—'}</div>`
+}
+let state, prev, tab = 0, step = 0
+function dispatch(action) { prev = state; state = Model.reduce(state, action); paint() }
+function reset() { state = Model.init(); prev = state; step = 0; paint() }
+function paint() {
+  $('state').innerHTML = VIEW(state, prev)
+  $('note').innerHTML = state.note ? `刚刚发生：${state.note}` : '点击下方任意按钮开始。蓝框 = 这一步发生变化的字段。'
+  const sc = SCENARIOS[tab]
+  $('tabs').innerHTML = SCENARIOS.map((s, i) => `<button data-tab="${i}" class="${i === tab ? 'on' : ''}">${s.name}</button>`).join('')
+  $('desc').innerHTML = sc.desc
+  $('steps').innerHTML = sc.steps.map((s, i) => `<button data-step="${i}" class="${i < step ? 'done' : i === step ? 'next' : ''}" ${i === step ? '' : 'disabled'}>${i + 1}. ${s.label}</button>`).join('') +
+    (step >= sc.steps.length ? '<p class="ok">✓ 演练完成。可以切换其他场景，或继续自由试玩。</p>' : '')
+}
+$('free').innerHTML = ACTIONS.map((a, i) => `<button data-free="${i}">${a.label}</button>`).join('')
+$('reset').onclick = reset
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button')
+  if (!b) return
+  if (b.dataset.free) dispatch(ACTIONS[b.dataset.free].action)
+  if (b.dataset.tab) { tab = +b.dataset.tab; reset() }
+  if (b.dataset.step) { const s = SCENARIOS[tab].steps[step++]; dispatch(s.action) }
+})
+reset()
+</script>
+</body>
+</html>
