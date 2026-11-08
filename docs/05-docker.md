@@ -699,6 +699,8 @@ docker-compose up -d
 
 ## 8. Vercel / 云服务器部署
 
+个人项目不想买云服务器时，用 [附录 A：Cloudflare](appendix-a-cloudflare.md) 把域名、静态站和 API 放在边缘上。用户主要在国内时，仍用下面的云服务器。
+
 ### 8.1 Vercel 部署（前端 + Serverless）
 
 ```bash

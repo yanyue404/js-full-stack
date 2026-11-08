@@ -1,0 +1,11 @@
+# prototype 单页占了语言统计的大头，GitHub 因此把仓库标成 HTML。
+# vendored 只影响统计，不改变 HTML 高亮。
+prototype/** linguist-vendored
+*.html linguist-vendored
+
+# Linguist 默认排除 demos/。这里是课堂练习，计入统计。
+demos/** -linguist-vendored
+
+# 卡片语言显示为 JavaScript。
+*.ts linguist-language=JavaScript
+*.tsx linguist-language=JavaScript

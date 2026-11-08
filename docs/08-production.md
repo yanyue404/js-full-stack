@@ -945,6 +945,8 @@ SELECT pg_terminate_backend(12345);
 
 ## 12. 云产品基础
 
+对象存储、CDN、WAF 如果想收成一家、少管机器，对照 [附录 A：Cloudflare](appendix-a-cloudflare.md)。本节仍按阿里云 / 腾讯云来记。
+
 ### 12.1 常用云产品
 
 | 产品      | 用途               | 阿里云               | 腾讯云           |

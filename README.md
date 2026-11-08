@@ -17,7 +17,7 @@
 | 数据库   | PostgreSQL + Drizzle ORM                           |
 | 容器化   | Docker + docker-compose                            |
 | AI 集成  | Vercel AI SDK + OpenAI / Claude API                |
-| 部署     | Vercel / 阿里云 / 腾讯云                           |
+| 部署     | Vercel / 阿里云 / 腾讯云 / Cloudflare（附录 A）    |
 
 ## 学员要求
 
@@ -170,6 +170,23 @@
 
 ---
 
+## 附录
+
+### [附录 A：Cloudflare（独立开发者）](docs/appendix-a-cloudflare.md)
+
+> 不买云服务器，把域名、站点、API、数据库、文件、邮件和防刷接到同一条边缘上。用户主要在国内时，仍走第五讲和第八讲。
+
+1. 三条上线路径，以及什么时候选 Cloudflare
+2. 产品地图：DNS、HTTPS、缓存、Workers、Static Assets
+3. KV、D1、R2、Hyperdrive 怎么选
+4. Cron、Queues、Durable Objects、Workflows
+5. Email Routing / Email Sending、Turnstile、Tunnel
+6. 日志、Web Analytics，以及和第六讲的 AI 接法
+7. 部署、预览、回滚
+8. 三条能上线的组合、免费额度与自测清单
+
+---
+
 ## 推荐学习路线
 
 ```
@@ -215,6 +232,7 @@
 - [Vercel AI SDK](https://sdk.vercel.ai)
 - [Docker 官方文档](https://docs.docker.com)
 - [PostgreSQL 教程](https://www.postgresqltutorial.com)
+- [Cloudflare 文档](https://developers.cloudflare.com/)
 
 ## License
 
